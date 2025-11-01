@@ -48,8 +48,7 @@ jobs:
 
       - name: Configure Docker for Artifact Registry
       # This command uses the gcloud credentials to authorize Docker access.
-        run: |
-          gcloud auth configure-docker ${{ env.AR_REGION }}-docker.pkg.dev
+        run: gcloud auth configure-docker ${{ env.AR_REGION }}-docker.pkg.dev
         
       - name: Build and Push Docker Image to Artifact Registry
         id: docker-build-push
