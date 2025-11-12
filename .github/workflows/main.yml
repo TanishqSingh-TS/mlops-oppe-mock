@@ -207,10 +207,6 @@ jobs:
           EXTERNAL_URL="http://${{ steps.get_ip.outputs.external_ip }}"
           PAYLOAD='{"sepal_length": 5.1, "sepal_width": 3.5, "petal_length": 1.4, "petal_width": 0.2}'
           
-          echo "Warming up /model/fetch_and_predict..."
-          # Using silent curl (-s) and piping to /dev/null to prevent large output in logs
-          curl -s -X POST -H "Content-Type: application/json" -d "$PAYLOAD" "${EXTERNAL_URL}/model/fetch_and_predict" > /dev/null 2>&1
-          echo -e "\n/model/fetch_and_predict warm-up complete."
           
           echo "Warming up /predict..."
           curl -s -X POST -H "Content-Type: application/json" -d "$PAYLOAD" "${EXTERNAL_URL}/predict" > /dev/null 2>&1
