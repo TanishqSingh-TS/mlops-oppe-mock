@@ -24,7 +24,7 @@ app = FastAPI(
 )
 
 # MLflow Configuration
-MLFLOW_TRACKING_URI = "http://34.16.10.168:5000/"
+MLFLOW_TRACKING_URI = "http://34.132.14.207:5000/"
 REGISTERED_MODEL_NAME = "iris-tree-classifier"
 DATA_PATH = os.path.join(SCRIPT_DIR, "data", "iris.csv") 
 SAVE_PATH = "artifacts"  # Matches the path in your fetch script

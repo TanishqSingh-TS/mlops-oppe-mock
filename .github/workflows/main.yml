@@ -183,72 +183,83 @@ jobs:
       - name: Get Service External IP
         id: get_ip
         run: |
-          # Wait until the LoadBalancer is provisioned and has an external IP
-          echo "Waiting for external IP on service ${{ env.DEPLOYMENT_NAME }}-service..."
-          for i in $(seq 1 10); do
-            EXTERNAL_IP=$(kubectl get svc ${{ env.DEPLOYMENT_NAME }}-service -o jsonpath='{.status.loadBalancer.ingress[0].ip}')
-            if [ -n "$EXTERNAL_IP" ]; then
-              echo "::set-output name=external_ip::$EXTERNAL_IP"
-              echo "External IP found: $EXTERNAL_IP"
-              break
-            fi
-            echo "Waiting for IP... try $i/10"
-            sleep 30
-          done
-          if [ -z "$EXTERNAL_IP" ]; then
-            echo "Error: External IP not provisioned after 5 minutes."
-            exit 1
-          fi
+          echo "Attempting to retrieve external IP..."
+          EXTERNAL_IP=$(kubectl get svc ${{ env.DEPLOYMENT_NAME }}-service -o jsonpath='{.status.loadBalancer.ingress[0].ip}')
           
+          echo "::set-output name=external_ip::$EXTERNAL_IP"
+          echo "External IP found: $EXTERNAL_IP"
+
+      # -----------------------------------------------------
+      # NEW: SETUP LUA SCRIPT AND WARM-UP
+      # -----------------------------------------------------
+      - name: Create wrk Lua Script for POST requests
+        run: |
+          cat << EOF > iris_payload.lua
+          local post_body = '{"sepal_length": 5.1, "sepal_width": 3.5, "petal_length": 1.4, "petal_width": 0.2}'
+          
+          request = function()
+            return wrk.format("POST", nil, {["Content-Type"] = "application/json"}, post_body)
+          end
+          EOF
+          
+      - name: Warm-up Model Endpoints with curl (POST requests)
+        run: |
+          EXTERNAL_URL="http://${{ steps.get_ip.outputs.external_ip }}"
+          PAYLOAD='{"sepal_length": 5.1, "sepal_width": 3.5, "petal_length": 1.4, "petal_width": 0.2}'
+          
+          echo "Warming up /model/fetch_and_predict..."
+          # Using silent curl (-s) and piping to /dev/null to prevent large output in logs
+          curl -s -X POST -H "Content-Type: application/json" -d "$PAYLOAD" "${EXTERNAL_URL}/model/fetch_and_predict" > /dev/null 2>&1
+          echo -e "\n/model/fetch_and_predict warm-up complete."
+          
+          echo "Warming up /predict..."
+          curl -s -X POST -H "Content-Type: application/json" -d "$PAYLOAD" "${EXTERNAL_URL}/predict" > /dev/null 2>&1
+          echo -e "\n/predict warm-up complete."
+
       # -----------------------------------------------------
       # SCENARIO 1: HPA DEMONSTRATION (Max Pods: 3)
       # -----------------------------------------------------
-      - name: Configure HPA for Max Pods 3 and Stress Test (1000+ Requests)
+      - name: Configure HPA for Max Pods 3 and Stress Test /predict (100 Users, 30s)
         id: scenario_1
         run: |
           EXTERNAL_URL="http://${{ steps.get_ip.outputs.external_ip }}"
-          echo "## 📈 SCENARIO 1: HPA Scaling (Max Pods: 3)" > stress_report.md
+          TARGET_ENDPOINT="${EXTERNAL_URL}/predict"
+          echo "## SCENARIO 1: HPA Scaling on \`/predict\` (Max Pods: 3, 100 Users)" > stress_report.md
           
           # 1. Ensure HPA maxReplicas is 3
           kubectl patch hpa/fastapi-backend-hpa -p '{"spec":{"maxReplicas": 3}}'
           echo "HPA set to maxReplicas=3. Deployment scaled to 1 initially."
-          kubectl get hpa fastapi-backend-hpa
           
-          # 2. Run wrk: sustained load (120 connections for 30s will exceed 1000 total requests)
-          echo "Starting stress test on $EXTERNAL_URL to trigger HPA..."
-          wrk -t4 -c120 -d30s $EXTERNAL_URL > wrk_results_1.txt
+          # 2. Run wrk: sustained load (100 connections for 30s) hitting /predict
+          echo "Starting stress test on $TARGET_ENDPOINT for 30 seconds..."
+          # Use Lua script for POST requests
+          wrk -t4 -c100 -d30s --script ./iris_payload.lua $TARGET_ENDPOINT > wrk_results_1.txt
           
-          # 3. Capture Results and Status
-          REQUESTS_SEC=$(grep 'Requests/sec:' wrk_results_1.txt | awk '{print $2}')
-          LATENCY_AVG=$(grep 'Latency' wrk_results_1.txt | head -1 | awk '{print $2}')
-          
-          echo "Test 1 Results Captured: RPS=$REQUESTS_SEC, Latency=$LATENCY_AVG"
-          
-          # 4. Write CML Report for Scenario 1
-          echo "The load test ran for 30 seconds with 120 concurrent connections to stimulate the high request scenario." >> stress_report.md
+          # 3. Write CML Report for Scenario 1 - Dump Raw Output
+          echo "The load test ran for **30 seconds** with 100 concurrent connections hitting \`/predict\` (POST)." >> stress_report.md
           echo "" >> stress_report.md
-          echo "### Test 1 Results:" >> stress_report.md
-          echo "| Metric | Value |" >> stress_report.md
-          echo "|---|---|" >> stress_report.md
-          echo "| **Requests/sec** | ${REQUESTS_SEC} |" >> stress_report.md
-          echo "| **Avg Latency** | ${LATENCY_AVG} |" >> stress_report.md
-          echo "" >> stress_report.md
+          echo "### Test 1 Results (Raw wrk Output - /predict):" >> stress_report.md
+          echo "\`\`\`text" >> stress_report.md
+          cat wrk_results_1.txt >> stress_report.md
+          echo "\`\`\`" >> stress_report.md
           
-          # 5. Observe Scaling (Wait for HPA to act)
+          # 4. Observe Scaling (Wait for HPA to act)
           echo "Waiting 60s to observe scaling..." >> stress_report.md
           sleep 60
+          echo "### Kubernetes Status After Scaling Attempt:" >> stress_report.md
           kubectl get deployment fastapi-backend -o wide >> stress_report.md
           kubectl get hpa fastapi-backend-hpa -o wide >> stress_report.md
-
+          
       # -----------------------------------------------------
-      # SCENARIO 2: BOTTLENECK OBSERVATION (Max Pods: 1, Concurrency 2000)
+      # SCENARIO 2: BOTTLENECK OBSERVATION (Max Pods: 1, Concurrency 1000)
       # -----------------------------------------------------
-      - name: Restrict HPA to Max Pods 1 and Stress Test (Concurrency 2000)
+      - name: Restrict HPA to Max Pods 1 and Stress Test /health (Concurrency 1000)
         id: scenario_2
         run: |
           EXTERNAL_URL="http://${{ steps.get_ip.outputs.external_ip }}"
+          TARGET_ENDPOINT="${EXTERNAL_URL}/health"
           echo -e "\n\n---" >> stress_report.md
-          echo "## 🚨 SCENARIO 2: Bottleneck (Max Pods: 1, Concurrency: 2000)" >> stress_report.md
+          echo "##  SCENARIO 2: Bottleneck (Max Pods: 1, Concurrency: 1000) on \`/health\`" >> stress_report.md
           
           # 1. Restrict scaling
           kubectl scale deployment/fastapi-backend --replicas=1 # Scale down
@@ -256,26 +267,54 @@ jobs:
           echo "HPA restricted to maxReplicas=1."
           sleep 30 # Give K8s time to adjust
           
-          # 2. Run wrk: high concurrency bottleneck test (2000 connections)
-          echo "Starting bottleneck test on $EXTERNAL_URL with concurrency 2000..."
-          wrk -t4 -c2000 -d10s $EXTERNAL_URL > wrk_results_2.txt
+          # 2. Run wrk: high concurrency bottleneck test (1000 connections) hitting /health
+          echo "Starting bottleneck test on $TARGET_ENDPOINT with concurrency 1000 for 120 seconds..."
+          wrk -t4 -c1000 -d120s $TARGET_ENDPOINT > wrk_results_2.txt
           
-          # 3. Capture Results and Errors
-          REQUESTS_SEC=$(grep 'Requests/sec:' wrk_results_2.txt | awk '{print $2}')
-          LATENCY_AVG=$(grep 'Latency' wrk_results_2.txt | head -1 | awk '{print $2}')
-          ERRORS=$(grep 'Socket errors:' wrk_results_2.txt | awk '{print $3}')
-          
-          echo "Test 2 Results Captured: RPS=$REQUESTS_SEC, Latency=$LATENCY_AVG, Errors=$ERRORS"
-          
-          # 4. Write CML Report for Scenario 2
-          echo "This test uses extreme concurrency (2000 connections) against a single replica." >> stress_report.md
+          # 3. Write CML Report for Scenario 2 - Dump Raw Output
+          echo "This test uses high concurrency (1000 connections) hitting \`/health\` (GET)." >> stress_report.md
           echo "" >> stress_report.md
-          echo "### Test 2 Results:" >> stress_report.md
-          echo "| Metric | Value | Observation |" >> stress_report.md
-          echo "|---|---|---|" >> stress_report.md
-          echo "| **Requests/sec** | ${REQUESTS_SEC} | Low throughput due to bottleneck |" >> stress_report.md
-          echo "| **Avg Latency** | ${LATENCY_AVG} | Expected to be very high |" >> stress_report.md
-          echo "| **Socket Errors** | ${ERRORS} | High errors indicate connection failures/drops |" >> stress_report.md
+          echo "### Test 2 Results (Raw wrk Output - /health, C: 1000):" >> stress_report.md
+          echo "\`\`\`text" >> stress_report.md
+          cat wrk_results_2.txt >> stress_report.md
+          echo "\`\`\`" >> stress_report.md
           
+          # 4. Observe Status
+          echo "### Kubernetes Status After C: 1000 Test (Should remain 1 replica):" >> stress_report.md
+          kubectl get deployment fastapi-backend -o wide >> stress_report.md
+          kubectl get hpa fastapi-backend-hpa -o wide >> stress_report.md
+
+      # -----------------------------------------------------
+      # SCENARIO 3: SEVERE BOTTLENECK OBSERVATION (Max Pods: 1, Concurrency 2000)
+      # -----------------------------------------------------
+      - name: Stress Test /health (Concurrency 2000)
+        id: scenario_3
+        run: |
+          EXTERNAL_URL="http://${{ steps.get_ip.outputs.external_ip }}"
+          TARGET_ENDPOINT="${EXTERNAL_URL}/health"
+          echo -e "\n\n---" >> stress_report.md
+          echo "##  SCENARIO 3: Severe Bottleneck (Max Pods: 1, Concurrency: 2000) on \`/health\`" >> stress_report.md
+          
+          # 1. Scaling restriction remains from Scenario 2
+          
+          # 2. Run wrk: extreme concurrency bottleneck test (2000 connections) hitting /health
+          echo "Starting severe bottleneck test on $TARGET_ENDPOINT with concurrency 2000 for 60 seconds..."
+          wrk -t4 -c2000 -d60s $TARGET_ENDPOINT > wrk_results_3.txt
+          
+          # 3. Write CML Report for Scenario 3 - Dump Raw Output
+          echo "This test uses **extreme** concurrency (2000 connections) hitting \`/health\` (GET)." >> stress_report.md
+          echo "" >> stress_report.md
+          echo "### Test 3 Results (Raw wrk Output - /health, C: 2000):" >> stress_report.md
+          echo "\`\`\`text" >> stress_report.md
+          cat wrk_results_3.txt >> stress_report.md
+          echo "\`\`\`" >> stress_report.md
+          
+          # 4. Observe Status
+          echo "### Kubernetes Status After C: 2000 Test (Should remain 1 replica):" >> stress_report.md
+          kubectl get deployment fastapi-backend -o wide >> stress_report.md
+          kubectl get hpa fastapi-backend-hpa -o wide >> stress_report.md
+
       - name: Create CML Report Comment
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: cml comment create stress_report.md
