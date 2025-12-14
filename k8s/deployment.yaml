@@ -17,13 +17,32 @@ spec:
         image: us-central1-docker.pkg.dev/keen-phalanx-473718-p1/mlops-mlflow/fastapi-backend:latest
         ports:
         - containerPort: 8000
+        
+        # Mount GCP Service Account Secret
+        env:
+        - name: GOOGLE_APPLICATION_CREDENTIALS
+          value: /var/secrets/google/gcp-sa.json
+        - name: MLFLOW_TRACKING_URI
+          value: "http://34.71.75.36:5000/"
+        
+        volumeMounts:
+        - name: gcp-sa-volume
+          mountPath: /var/secrets/google
+          readOnly: true
+        
         resources:
           requests:
             cpu: "100m"
-            memory: "128Mi"
+            memory: "256Mi"
           limits:
             cpu: "500m" 
             memory: "512Mi"
+      
+      # Define volume from secret
+      volumes:
+      - name: gcp-sa-volume
+        secret:
+          secretName: gcp-sa-secret
 ---
 apiVersion: v1
 kind: Service
@@ -38,7 +57,6 @@ spec:
     port: 80
     targetPort: 8000
 ---
-
 apiVersion: autoscaling/v2
 kind: HorizontalPodAutoscaler
 metadata:
@@ -56,4 +74,4 @@ spec:
       name: cpu
       target:
         type: Utilization
-        averageUtilization: 50 
+        averageUtilization: 50

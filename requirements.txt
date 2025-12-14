@@ -11,3 +11,7 @@ dvc
 dvc-gs
 google-cloud-storage
 dvc[gcs]
+sniffio
+evidently
+shap
+
