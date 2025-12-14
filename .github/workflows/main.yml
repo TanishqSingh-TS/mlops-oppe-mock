@@ -60,7 +60,7 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Set up Python
-        uses: actions/setup-python@v4
+        uses: actions/setup-python@v5
         with:
           python-version: '3.10'
       
@@ -112,7 +112,7 @@ jobs:
             echo "" >> ci_experiments_report.md
             cml publish ci_artifacts/ci_confusion_matrix.png --md >> ci_experiments_report.md
             echo "" >> ci_experiments_report.md
-            echo "✅ **Confusion Matrix:** Shows classification accuracy across all 3 species" >> ci_experiments_report.md
+            echo "✅ **Confusion Matrix:** Shows classification accuracy across all 3 species (setosa, versicolor, virginica)" >> ci_experiments_report.md
           else
             echo "⚠️ Confusion matrix not found." >> ci_experiments_report.md
           fi
@@ -136,7 +136,7 @@ jobs:
               echo "" >> ci_experiments_report.md
               cml publish "ci_artifacts/ci_shap_waterfall_${species}.png" --md >> ci_experiments_report.md
               echo "" >> ci_experiments_report.md
-              echo "Shows feature contributions to prediction." >> ci_experiments_report.md
+              echo "Shows how each feature contributes to pushing the prediction from base value." >> ci_experiments_report.md
               echo "" >> ci_experiments_report.md
             fi
             
@@ -154,7 +154,7 @@ jobs:
               echo "" >> ci_experiments_report.md
               cml publish "ci_artifacts/ci_shap_bar_${species}.png" --md >> ci_experiments_report.md
               echo "" >> ci_experiments_report.md
-              echo "Mean absolute SHAP values for this species." >> ci_experiments_report.md
+              echo "Mean absolute SHAP values - most important features for predicting this species." >> ci_experiments_report.md
               echo "" >> ci_experiments_report.md
             fi
             
@@ -168,15 +168,51 @@ jobs:
           echo "" >> ci_experiments_report.md
           echo "## 📉 Data Drift Detection (Evidently AI)" >> ci_experiments_report.md
           echo "" >> ci_experiments_report.md
+          echo "Compares reference data (training) with current data (test) to identify distribution changes." >> ci_experiments_report.md
+          echo "" >> ci_experiments_report.md
           
           if [ -f "ci_artifacts/ci_drift_report.html" ]; then
+            echo "### Drift Report Summary" >> ci_experiments_report.md
+            echo "" >> ci_experiments_report.md
             echo "✅ Drift analysis completed successfully" >> ci_experiments_report.md
             echo "" >> ci_experiments_report.md
-            echo "**Features analyzed:** sepal_length, sepal_width, petal_length, petal_width" >> ci_experiments_report.md
+            echo "**Key Metrics:**" >> ci_experiments_report.md
+            echo "- Reference dataset: Training data" >> ci_experiments_report.md
+            echo "- Current dataset: Test data" >> ci_experiments_report.md
+            echo "- Features analyzed: sepal_length, sepal_width, petal_length, petal_width" >> ci_experiments_report.md
             echo "" >> ci_experiments_report.md
             echo "📄 Full HTML report available in workflow artifacts" >> ci_experiments_report.md
           else
             echo "⚠️ Drift report not generated" >> ci_experiments_report.md
+          fi
+          echo "" >> ci_experiments_report.md
+
+      - name: Add Fairness Metrics to Report
+        run: |
+          echo "---" >> ci_experiments_report.md
+          echo "" >> ci_experiments_report.md
+          echo "## ⚖️ Fairness Analysis" >> ci_experiments_report.md
+          echo "" >> ci_experiments_report.md
+          echo "Evaluates model performance across different demographic groups (location attribute)." >> ci_experiments_report.md
+          echo "" >> ci_experiments_report.md
+          
+          # Extract fairness metrics if available
+          if grep -q "Fairness Accuracy Difference:" ci_experiments_report.md 2>/dev/null; then
+            fairness_diff=$(grep "Fairness Accuracy Difference:" ci_experiments_report.md | grep -oP '[\d.]+' | head -1)
+            echo "### Fairness Metrics Summary" >> ci_experiments_report.md
+            echo "" >> ci_experiments_report.md
+            echo "- **Accuracy Difference Between Groups:** ${fairness_diff}" >> ci_experiments_report.md
+            echo "" >> ci_experiments_report.md
+            
+            if (( $(echo "$fairness_diff < 0.05" | bc -l) )); then
+              echo "✅ **Status:** Minimal bias (difference < 0.05)" >> ci_experiments_report.md
+            elif (( $(echo "$fairness_diff < 0.10" | bc -l) )); then
+              echo "⚠️ **Status:** Moderate bias detected (0.05 ≤ difference < 0.10)" >> ci_experiments_report.md
+            else
+              echo "❌ **Status:** Significant bias detected (difference ≥ 0.10)" >> ci_experiments_report.md
+            fi
+          else
+            echo "Fairness metrics will be displayed after experiment completion." >> ci_experiments_report.md
           fi
           echo "" >> ci_experiments_report.md
 
@@ -189,15 +225,43 @@ jobs:
           echo "| Species | Precision | Recall | F1-Score |" >> ci_experiments_report.md
           echo "|---------|-----------|--------|----------|" >> ci_experiments_report.md
           
-          # Extract metrics from logs if available
-          grep -E "(setosa|versicolor|virginica): P=" ci_experiments_report.md | while read line; do
-            species=$(echo $line | cut -d: -f1 | xargs)
-            precision=$(echo $line | grep -oP 'P=\K[\d.]+')
-            recall=$(echo $line | grep -oP 'R=\K[\d.]+')
-            f1=$(echo $line | grep -oP 'F1=\K[\d.]+')
-            echo "| **${species^}** | ${precision} | ${recall} | ${f1} |" >> ci_experiments_report.md
-          done || echo "| Pending | - | - | - |" >> ci_experiments_report.md
+          # Try to extract metrics
+          if grep -q "setosa: P=" ci_experiments_report.md 2>/dev/null; then
+            for species in setosa versicolor virginica; do
+              line=$(grep "${species}: P=" ci_experiments_report.md | head -1)
+              if [ ! -z "$line" ]; then
+                precision=$(echo "$line" | grep -oP 'P=\K[\d.]+')
+                recall=$(echo "$line" | grep -oP 'R=\K[\d.]+')
+                f1=$(echo "$line" | grep -oP 'F1=\K[\d.]+')
+                echo "| **${species^}** | ${precision} | ${recall} | ${f1} |" >> ci_experiments_report.md
+              fi
+            done
+          else
+            echo "| Pending | - | - | - |" >> ci_experiments_report.md
+          fi
           
+          echo "" >> ci_experiments_report.md
+
+      - name: Add Artifacts Summary
+        run: |
+          echo "---" >> ci_experiments_report.md
+          echo "" >> ci_experiments_report.md
+          echo "## 📦 Generated Artifacts" >> ci_experiments_report.md
+          echo "" >> ci_experiments_report.md
+          
+          if [ -d "ci_artifacts" ]; then
+            echo "### Files Generated:" >> ci_experiments_report.md
+            echo '```
+            ls -lh ci_artifacts/ >> ci_experiments_report.md
+            echo '```' >> ci_experiments_report.md
+            echo "" >> ci_experiments_report.md
+            
+            echo "### Artifact Categories:" >> ci_experiments_report.md
+            echo "- **SHAP Plots:** Waterfall, Beeswarm, and Bar charts for each species" >> ci_experiments_report.md
+            echo "- **Confusion Matrix:** Multi-class classification performance" >> ci_experiments_report.md
+            echo "- **Drift Reports:** HTML reports from Evidently AI" >> ci_experiments_report.md
+            echo "- **Model Artifacts:** Logged to MLflow" >> ci_experiments_report.md
+          fi
           echo "" >> ci_experiments_report.md
 
       - name: Add MLflow Tracking Info
@@ -206,6 +270,8 @@ jobs:
           echo "" >> ci_experiments_report.md
           echo "## 🔬 MLflow Experiment Tracking" >> ci_experiments_report.md
           echo "" >> ci_experiments_report.md
+          echo "All experiments tracked in MLflow for reproducibility and comparison." >> ci_experiments_report.md
+          echo "" >> ci_experiments_report.md
           echo "**MLflow UI:** [View Experiments](http://34.71.75.36:5000)" >> ci_experiments_report.md
           echo "" >> ci_experiments_report.md
           echo "**Experiment Name:** \`ci-experiment\`" >> ci_experiments_report.md
@@ -213,15 +279,16 @@ jobs:
           echo "### Logged Information:" >> ci_experiments_report.md
           echo "- ✅ Model hyperparameters" >> ci_experiments_report.md
           echo "- ✅ Training and validation metrics" >> ci_experiments_report.md
-          echo "- ✅ Visualization artifacts (SHAP, confusion matrix)" >> ci_experiments_report.md
+          echo "- ✅ All visualization artifacts (SHAP, confusion matrix)" >> ci_experiments_report.md
           echo "- ✅ Fairness and drift detection results" >> ci_experiments_report.md
+          echo "- ✅ Model binaries for deployment" >> ci_experiments_report.md
           echo "" >> ci_experiments_report.md
           echo "---" >> ci_experiments_report.md
           echo "" >> ci_experiments_report.md
-          echo "🤖 *Generated by CI/CD Pipeline*" >> ci_experiments_report.md
+          echo "🤖 *Generated by CI/CD Pipeline* | 📅 $(date -u '+%Y-%m-%d %H:%M:%S UTC')" >> ci_experiments_report.md
 
       - name: Upload CI Artifacts
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: ci-experiment-artifacts
           path: ci_artifacts/
@@ -241,7 +308,7 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Set up Python
-        uses: actions/setup-python@v4
+        uses: actions/setup-python@v5
         with:
           python-version: '3.10'
       
@@ -372,22 +439,30 @@ jobs:
           STRESS_EOF
           
           echo "**External IP:** ${{ steps.get_ip.outputs.external_ip }}" >> stress_report.md
+          echo "**Test Date:** $(date -u '+%Y-%m-%d %H:%M:%S UTC')" >> stress_report.md
           echo "" >> stress_report.md
           echo "---" >> stress_report.md
           echo "" >> stress_report.md
-          echo "## SCENARIO 1: HPA Scaling (Max Pods: 3, 100 Users)" >> stress_report.md
+          echo "## SCENARIO 1: HPA Scaling on \`/predict\` (Max Pods: 3, 100 Users)" >> stress_report.md
           echo "" >> stress_report.md
           
           kubectl patch hpa/fastapi-backend-hpa -p '{"spec":{"maxReplicas": 3}}'
+          echo "Starting 30-second stress test with 100 concurrent connections..." >> stress_report.md
+          echo "" >> stress_report.md
+          
           wrk -t4 -c100 -d30s --script ./iris_payload.lua $TARGET > wrk_results_1.txt
           
+          echo "### Test 1 Results:" >> stress_report.md
           echo '```
           cat wrk_results_1.txt >> stress_report.md
           echo '```' >> stress_report.md
           
-          sleep 60
           echo "" >> stress_report.md
-          echo "### Kubernetes Status:" >> stress_report.md
+          echo "Waiting 60s to observe scaling..." >> stress_report.md
+          sleep 60
+          
+          echo "" >> stress_report.md
+          echo "### Kubernetes Status After Scaling:" >> stress_report.md
           echo '```
           kubectl get deployment fastapi-backend -o wide >> stress_report.md
           kubectl get hpa fastapi-backend-hpa -o wide >> stress_report.md
@@ -400,21 +475,24 @@ jobs:
           
           echo "" >> stress_report.md
           echo "---" >> stress_report.md
-          echo "## SCENARIO 2: Bottleneck (Max Pods: 1, C: 1000)" >> stress_report.md
+          echo "## SCENARIO 2: Bottleneck (Max Pods: 1, C: 1000) on \`/health\`" >> stress_report.md
           echo "" >> stress_report.md
           
           kubectl scale deployment/fastapi-backend --replicas=1
           kubectl patch hpa/fastapi-backend-hpa -p '{"spec":{"maxReplicas": 1}}'
+          echo "HPA restricted to maxReplicas=1. Starting 120-second test..." >> stress_report.md
+          echo "" >> stress_report.md
           sleep 30
           
           wrk -t4 -c1000 -d120s $TARGET > wrk_results_2.txt
           
+          echo "### Test 2 Results:" >> stress_report.md
           echo '```
           cat wrk_results_2.txt >> stress_report.md
           echo '```' >> stress_report.md
           
           echo "" >> stress_report.md
-          echo "### Status:" >> stress_report.md
+          echo "### Kubernetes Status After Test:" >> stress_report.md
           echo '```
           kubectl get deployment fastapi-backend -o wide >> stress_report.md
           kubectl get hpa fastapi-backend-hpa -o wide >> stress_report.md
@@ -427,18 +505,28 @@ jobs:
           
           echo "" >> stress_report.md
           echo "---" >> stress_report.md
-          echo "## SCENARIO 3: Severe Bottleneck (C: 2000)" >> stress_report.md
+          echo "## SCENARIO 3: Severe Bottleneck (Max Pods: 1, C: 2000)" >> stress_report.md
+          echo "" >> stress_report.md
+          echo "Testing with **extreme** concurrency (2000 connections) for 60 seconds." >> stress_report.md
           echo "" >> stress_report.md
           
           wrk -t4 -c2000 -d60s $TARGET > wrk_results_3.txt
           
+          echo "### Test 3 Results:" >> stress_report.md
           echo '```
           cat wrk_results_3.txt >> stress_report.md
           echo '```' >> stress_report.md
           
           echo "" >> stress_report.md
+          echo "### Kubernetes Status After Test:" >> stress_report.md
+          echo '```
+          kubectl get deployment fastapi-backend -o wide >> stress_report.md
+          kubectl get hpa fastapi-backend-hpa -o wide >> stress_report.md
+          echo '```' >> stress_report.md
+          echo "" >> stress_report.md
           echo "---" >> stress_report.md
-          echo "🤖 *Generated by CI/CD Pipeline*" >> stress_report.md
+          echo "" >> stress_report.md
+          echo "🤖 *Generated by CI/CD Pipeline* | 📅 $(date -u '+%Y-%m-%d %H:%M:%S UTC')" >> stress_report.md
 
       - name: Create CML Stress Test Report
         env:
