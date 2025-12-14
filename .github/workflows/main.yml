@@ -13,22 +13,17 @@ permissions:
   id-token: write
 
 env:
-  # --- GCP & Artifact Registry Configuration ---
   PROJECT_ID: keen-phalanx-473718-p1
   AR_REGION: us-central1
   GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
   AR_REPOSITORY: mlops-mlflow
   IMAGE_NAME: fastapi-backend
-  # --- GKE Deployment Configuration ---
   GKE_CLUSTER: fastapi-ci-cluster
   GKE_ZONE: us-central1-a
   DEPLOYMENT_NAME: fastapi-backend
   MANIFEST_PATH: k8s/deployment.yaml
   
 jobs:
-  # ==========================================================
-  # JOB 1: INFRASTRUCTURE CREATION (Cluster Provisioning)
-  # ==========================================================
   infrastructure-setup:
     runs-on: ubuntu-latest
     timeout-minutes: 15
@@ -55,9 +50,6 @@ jobs:
             echo "Cluster ${{ env.GKE_CLUSTER }} already exists. Skipping creation."
           fi
 
-  # ==========================================================
-  # JOB 2: CI EXPERIMENTS (Run test_experiment.py)
-  # ==========================================================
   ci-experiments:
     runs-on: ubuntu-latest
     needs: infrastructure-setup
@@ -72,7 +64,7 @@ jobs:
         with:
           python-version: '3.10'
       
-      - name: Setup CML (Continuous Machine Learning)
+      - name: Setup CML
         uses: iterative/setup-cml@v2.0.1
 
       - name: Google Cloud Authentication
@@ -88,27 +80,26 @@ jobs:
       - name: DVC Pull Data
         run: dvc pull
 
-      - name: Run CI Experiments (test_experiment.py)
+      - name: Run CI Experiments
         run: |
-          echo "# 🔬 CI/CD Experiment Results" > ci_experiments_report.md
-          echo "" >> ci_experiments_report.md
-          echo "**Pipeline Run:** \`${{ github.sha }}\`" >> ci_experiments_report.md
-          echo "**Branch:** \`${{ github.ref_name }}\`" >> ci_experiments_report.md
-          echo "**Triggered by:** @${{ github.actor }}" >> ci_experiments_report.md
-          echo "" >> ci_experiments_report.md
-          echo "---" >> ci_experiments_report.md
-          echo "" >> ci_experiments_report.md
+          cat > ci_experiments_report.md << 'REPORT_EOF'
+          # 🔬 CI/CD Experiment Results
           
-          echo "## 📊 Experiment Execution Log" >> ci_experiments_report.md
-          echo "" >> ci_experiments_report.md
-          echo "\`\`\`" >> ci_experiments_report.md
+          **Pipeline Run:** `${{ github.sha }}`
+          **Branch:** `${{ github.ref_name }}`
+          **Triggered by:** @${{ github.actor }}
+          
+          ---
+          
+          ## 📊 Experiment Execution Log
+          
+          REPORT_EOF
+          
+          echo '```
           python test_experiment.py 2>&1 | tee -a ci_experiments_report.md
-          echo "\`\`\`" >> ci_experiments_report.md
+          echo '```' >> ci_experiments_report.md
           echo "" >> ci_experiments_report.md
 
-      # ========================================================
-      # DISPLAY CONFUSION MATRIX
-      # ========================================================
       - name: Add Confusion Matrix to Report
         run: |
           echo "---" >> ci_experiments_report.md
@@ -121,56 +112,49 @@ jobs:
             echo "" >> ci_experiments_report.md
             cml publish ci_artifacts/ci_confusion_matrix.png --md >> ci_experiments_report.md
             echo "" >> ci_experiments_report.md
-            echo "✅ **Confusion Matrix:** Shows classification accuracy across all 3 species (setosa, versicolor, virginica)" >> ci_experiments_report.md
+            echo "✅ **Confusion Matrix:** Shows classification accuracy across all 3 species" >> ci_experiments_report.md
           else
             echo "⚠️ Confusion matrix not found." >> ci_experiments_report.md
           fi
           echo "" >> ci_experiments_report.md
 
-      # ========================================================
-      # DISPLAY SHAP EXPLAINABILITY FOR ALL TARGETS
-      # ========================================================
       - name: Add SHAP Explainability to Report
         run: |
           echo "---" >> ci_experiments_report.md
           echo "" >> ci_experiments_report.md
           echo "## 🧠 SHAP Explainability Analysis - All Species" >> ci_experiments_report.md
           echo "" >> ci_experiments_report.md
-          echo "SHAP (SHapley Additive exPlanations) shows feature importance and contributions to model predictions for each species class." >> ci_experiments_report.md
+          echo "SHAP (SHapley Additive exPlanations) shows feature importance for each species." >> ci_experiments_report.md
           echo "" >> ci_experiments_report.md
           
-          # Iterate through all species
           for species in setosa versicolor virginica; do
             echo "### 🌸 Species: **${species^}**" >> ci_experiments_report.md
             echo "" >> ci_experiments_report.md
             
-            # Waterfall Plot
             if [ -f "ci_artifacts/ci_shap_waterfall_${species}.png" ]; then
-              echo "#### Waterfall Plot (Single Prediction Explanation)" >> ci_experiments_report.md
+              echo "#### Waterfall Plot (Single Prediction)" >> ci_experiments_report.md
               echo "" >> ci_experiments_report.md
               cml publish "ci_artifacts/ci_shap_waterfall_${species}.png" --md >> ci_experiments_report.md
               echo "" >> ci_experiments_report.md
-              echo "Shows how each feature contributes to pushing the prediction from the base value." >> ci_experiments_report.md
+              echo "Shows feature contributions to prediction." >> ci_experiments_report.md
               echo "" >> ci_experiments_report.md
             fi
             
-            # Beeswarm Plot
             if [ -f "ci_artifacts/ci_shap_beeswarm_${species}.png" ]; then
-              echo "#### Beeswarm Plot (Global Feature Importance)" >> ci_experiments_report.md
+              echo "#### Beeswarm Plot (Global Importance)" >> ci_experiments_report.md
               echo "" >> ci_experiments_report.md
               cml publish "ci_artifacts/ci_shap_beeswarm_${species}.png" --md >> ci_experiments_report.md
               echo "" >> ci_experiments_report.md
-              echo "Displays feature impact across all test samples - color indicates feature value (red=high, blue=low)." >> ci_experiments_report.md
+              echo "Feature impact across all samples (red=high, blue=low)." >> ci_experiments_report.md
               echo "" >> ci_experiments_report.md
             fi
             
-            # Bar Plot
             if [ -f "ci_artifacts/ci_shap_bar_${species}.png" ]; then
-              echo "#### Bar Plot (Average Feature Importance)" >> ci_experiments_report.md
+              echo "#### Bar Plot (Average Importance)" >> ci_experiments_report.md
               echo "" >> ci_experiments_report.md
               cml publish "ci_artifacts/ci_shap_bar_${species}.png" --md >> ci_experiments_report.md
               echo "" >> ci_experiments_report.md
-              echo "Shows mean absolute SHAP values - most important features for predicting this species." >> ci_experiments_report.md
+              echo "Mean absolute SHAP values for this species." >> ci_experiments_report.md
               echo "" >> ci_experiments_report.md
             fi
             
@@ -178,175 +162,49 @@ jobs:
             echo "" >> ci_experiments_report.md
           done
 
-      # ========================================================
-      # DISPLAY DATA DRIFT ANALYSIS
-      # ========================================================
       - name: Add Data Drift Analysis to Report
         run: |
           echo "---" >> ci_experiments_report.md
           echo "" >> ci_experiments_report.md
           echo "## 📉 Data Drift Detection (Evidently AI)" >> ci_experiments_report.md
           echo "" >> ci_experiments_report.md
-          echo "Data drift detection compares reference data (training set) with current data (test set) to identify distribution changes." >> ci_experiments_report.md
-          echo "" >> ci_experiments_report.md
           
-          # Check if drift report exists
           if [ -f "ci_artifacts/ci_drift_report.html" ]; then
-            echo "### Drift Report Summary" >> ci_experiments_report.md
+            echo "✅ Drift analysis completed successfully" >> ci_experiments_report.md
             echo "" >> ci_experiments_report.md
-            echo "📄 **Full HTML Report:** [View Drift Report](ci_artifacts/ci_drift_report.html)" >> ci_experiments_report.md
+            echo "**Features analyzed:** sepal_length, sepal_width, petal_length, petal_width" >> ci_experiments_report.md
             echo "" >> ci_experiments_report.md
-            
-            # Try to extract drift metrics from Python
-            python << EOF >> ci_experiments_report.md
-import json
-import os
-
-# Try to parse drift results if available
-drift_file = "ci_artifacts/ci_drift_report.html"
-if os.path.exists(drift_file):
-    print("✅ Drift analysis completed successfully")
-    print("")
-    print("**Key Metrics:**")
-    print("- Reference dataset size: Training data")
-    print("- Current dataset size: Test data") 
-    print("- Features analyzed: sepal_length, sepal_width, petal_length, petal_width")
-    print("")
-else:
-    print("⚠️ Drift report not found")
-EOF
-            echo "" >> ci_experiments_report.md
-            echo "" >> ci_experiments_report.md
-            
-            # Upload drift report as artifact
-            echo "📦 **Artifacts:** Drift report available in workflow artifacts" >> ci_experiments_report.md
+            echo "📄 Full HTML report available in workflow artifacts" >> ci_experiments_report.md
           else
-            echo "⚠️ Data drift report not generated." >> ci_experiments_report.md
+            echo "⚠️ Drift report not generated" >> ci_experiments_report.md
           fi
           echo "" >> ci_experiments_report.md
 
-      # ========================================================
-      # DISPLAY FAIRNESS METRICS
-      # ========================================================
-      - name: Add Fairness Metrics to Report
-        run: |
-          echo "---" >> ci_experiments_report.md
-          echo "" >> ci_experiments_report.md
-          echo "## ⚖️ Fairness Analysis" >> ci_experiments_report.md
-          echo "" >> ci_experiments_report.md
-          echo "Fairness metrics evaluate model performance across different demographic groups (location attribute)." >> ci_experiments_report.md
-          echo "" >> ci_experiments_report.md
-          
-          # Extract fairness metrics from experiment output
-          python << EOF >> ci_experiments_report.md
-import os
-import re
-
-# Try to extract fairness metrics from logs
-log_content = ""
-if os.path.exists("ci_experiments_report.md"):
-    with open("ci_experiments_report.md", "r") as f:
-        log_content = f.read()
-
-# Look for fairness accuracy difference in logs
-fairness_match = re.search(r'Fairness Accuracy Difference: ([\d.]+)', log_content)
-if fairness_match:
-    fairness_diff = float(fairness_match.group(1))
-    print(f"### Fairness Metrics Summary")
-    print("")
-    print(f"- **Accuracy Difference Between Groups:** {fairness_diff:.4f}")
-    print("")
-    if fairness_diff < 0.05:
-        print("✅ **Status:** Model shows minimal bias (difference < 0.05)")
-    elif fairness_diff < 0.10:
-        print("⚠️ **Status:** Moderate bias detected (0.05 ≤ difference < 0.10)")
-    else:
-        print("❌ **Status:** Significant bias detected (difference ≥ 0.10)")
-    print("")
-    print("Lower values indicate more fair predictions across demographic groups.")
-else:
-    print("Fairness metrics extraction pending...")
-EOF
-          echo "" >> ci_experiments_report.md
-
-      # ========================================================
-      # DISPLAY PERFORMANCE SUMMARY TABLE
-      # ========================================================
-      - name: Add Performance Summary Table
+      - name: Add Performance Summary
         run: |
           echo "---" >> ci_experiments_report.md
           echo "" >> ci_experiments_report.md
           echo "## 📊 Model Performance Summary" >> ci_experiments_report.md
           echo "" >> ci_experiments_report.md
+          echo "| Species | Precision | Recall | F1-Score |" >> ci_experiments_report.md
+          echo "|---------|-----------|--------|----------|" >> ci_experiments_report.md
           
-          # Create performance table
-          python << 'EOF' >> ci_experiments_report.md
-import os
-import re
-
-# Parse experiment output for metrics
-log_file = "ci_experiments_report.md"
-if os.path.exists(log_file):
-    with open(log_file, "r") as f:
-        content = f.read()
-    
-    # Extract species-specific metrics
-    species_metrics = {}
-    for species in ['setosa', 'versicolor', 'virginica']:
-        pattern = f'{species}: P=([\d.]+), R=([\d.]+), F1=([\d.]+)'
-        match = re.search(pattern, content)
-        if match:
-            species_metrics[species] = {
-                'precision': match.group(1),
-                'recall': match.group(2),
-                'f1': match.group(3)
-            }
-    
-    if species_metrics:
-        print("| Species | Precision | Recall | F1-Score |")
-        print("|---------|-----------|--------|----------|")
-        for species, metrics in species_metrics.items():
-            print(f"| **{species.capitalize()}** | {metrics['precision']} | {metrics['recall']} | {metrics['f1']} |")
-        print("")
-    else:
-        print("Metrics parsing in progress...")
-EOF
-          echo "" >> ci_experiments_report.md
-
-      # ========================================================
-      # DISPLAY ARTIFACTS SUMMARY
-      # ========================================================
-      - name: Add Artifacts Summary
-        run: |
-          echo "---" >> ci_experiments_report.md
-          echo "" >> ci_experiments_report.md
-          echo "## 📦 Generated Artifacts" >> ci_experiments_report.md
-          echo "" >> ci_experiments_report.md
-          echo "All experiment artifacts are stored in MLflow (experiment: \`ci-experiment\`) and GitHub Actions artifacts." >> ci_experiments_report.md
-          echo "" >> ci_experiments_report.md
-          echo "### Files Generated:" >> ci_experiments_report.md
-          echo "\`\`\`" >> ci_experiments_report.md
-          ls -lh ci_artifacts/ >> ci_experiments_report.md
-          echo "\`\`\`" >> ci_experiments_report.md
-          echo "" >> ci_experiments_report.md
+          # Extract metrics from logs if available
+          grep -E "(setosa|versicolor|virginica): P=" ci_experiments_report.md | while read line; do
+            species=$(echo $line | cut -d: -f1 | xargs)
+            precision=$(echo $line | grep -oP 'P=\K[\d.]+')
+            recall=$(echo $line | grep -oP 'R=\K[\d.]+')
+            f1=$(echo $line | grep -oP 'F1=\K[\d.]+')
+            echo "| **${species^}** | ${precision} | ${recall} | ${f1} |" >> ci_experiments_report.md
+          done || echo "| Pending | - | - | - |" >> ci_experiments_report.md
           
-          echo "### Artifact Categories:" >> ci_experiments_report.md
-          echo "- **SHAP Plots:** Waterfall, Beeswarm, and Bar charts for each species" >> ci_experiments_report.md
-          echo "- **Confusion Matrix:** Multi-class classification performance visualization" >> ci_experiments_report.md
-          echo "- **Drift Reports:** HTML reports from Evidently AI" >> ci_experiments_report.md
-          echo "- **Model Artifacts:** Saved models logged to MLflow" >> ci_experiments_report.md
           echo "" >> ci_experiments_report.md
 
-      # ========================================================
-      # DISPLAY MLFLOW TRACKING
-      # ========================================================
-      - name: Add MLflow Tracking Information
+      - name: Add MLflow Tracking Info
         run: |
           echo "---" >> ci_experiments_report.md
           echo "" >> ci_experiments_report.md
           echo "## 🔬 MLflow Experiment Tracking" >> ci_experiments_report.md
-          echo "" >> ci_experiments_report.md
-          echo "All experiments are tracked in MLflow for full reproducibility and comparison." >> ci_experiments_report.md
           echo "" >> ci_experiments_report.md
           echo "**MLflow UI:** [View Experiments](http://34.71.75.36:5000)" >> ci_experiments_report.md
           echo "" >> ci_experiments_report.md
@@ -355,14 +213,13 @@ EOF
           echo "### Logged Information:" >> ci_experiments_report.md
           echo "- ✅ Model hyperparameters" >> ci_experiments_report.md
           echo "- ✅ Training and validation metrics" >> ci_experiments_report.md
-          echo "- ✅ All visualization artifacts (SHAP, confusion matrix)" >> ci_experiments_report.md
+          echo "- ✅ Visualization artifacts (SHAP, confusion matrix)" >> ci_experiments_report.md
           echo "- ✅ Fairness and drift detection results" >> ci_experiments_report.md
-          echo "- ✅ Model binaries for deployment" >> ci_experiments_report.md
           echo "" >> ci_experiments_report.md
+          echo "---" >> ci_experiments_report.md
+          echo "" >> ci_experiments_report.md
+          echo "🤖 *Generated by CI/CD Pipeline*" >> ci_experiments_report.md
 
-      # ========================================================
-      # UPLOAD ARTIFACTS AND CREATE CML COMMENT
-      # ========================================================
       - name: Upload CI Artifacts
         uses: actions/upload-artifact@v3
         with:
@@ -370,23 +227,14 @@ EOF
           path: ci_artifacts/
           retention-days: 30
 
-      - name: Create Comprehensive CML Report Comment
+      - name: Create CML Report Comment
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          echo "" >> ci_experiments_report.md
-          echo "---" >> ci_experiments_report.md
-          echo "" >> ci_experiments_report.md
-          echo "🤖 *Generated by CI/CD Pipeline* | 📅 $(date -u '+%Y-%m-%d %H:%M:%S UTC')" >> ci_experiments_report.md
-          
-          cml comment create ci_experiments_report.md
+        run: cml comment create ci_experiments_report.md
 
-  # ==========================================================
-  # JOB 3: BUILD, PUSH, AND DEPLOYMENT
-  # ==========================================================
   build-and-deploy:
     runs-on: ubuntu-latest
-    needs: ci-experiments # Wait for CI tests to pass
+    needs: ci-experiments
     
     steps:
       - name: Checkout repository
@@ -397,7 +245,7 @@ EOF
         with:
           python-version: '3.10'
       
-      - name: Setup CML (Continuous Machine Learning)
+      - name: Setup CML
         uses: iterative/setup-cml@v2.0.1
 
       - name: Install DVC
@@ -406,7 +254,6 @@ EOF
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
         
-      # --- AUTHENTICATION & AR PUSH ---
       - name: Google Cloud Authentication
         uses: 'google-github-actions/auth@v2'
         with:
@@ -418,18 +265,16 @@ EOF
       - name: Configure Docker for Artifact Registry
         run: gcloud auth configure-docker ${{ env.AR_REGION }}-docker.pkg.dev
         
-      - name: Build and Push Docker Image to Artifact Registry
+      - name: Build and Push Docker Image
         run: |
           FULL_IMAGE_TAG="${{ env.AR_REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.AR_REPOSITORY }}/${{ env.IMAGE_NAME }}:${{ github.sha }}"
           LATEST_TAG="${{ env.AR_REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.AR_REPOSITORY }}/${{ env.IMAGE_NAME }}:latest"
           
-          echo "Building image and tagging as :latest and :${{ github.sha }}"
           docker build -t "${FULL_IMAGE_TAG}" -t "${LATEST_TAG}" .
           docker push "${FULL_IMAGE_TAG}"
           docker push "${LATEST_TAG}"
           
-      # --- GKE DEPLOYMENT ---
-      - name: Get GKE Credentials (Configure kubectl)
+      - name: Get GKE Credentials
         uses: google-github-actions/get-gke-credentials@v2
         with:
           cluster_name: ${{ env.GKE_CLUSTER }}
@@ -437,50 +282,34 @@ EOF
 
       - name: Create Kubernetes Secret for GCP Service Account
         run: |
-          # Create secret from GCP_SA credentials
           kubectl create secret generic gcp-sa-secret \
             --from-literal=gcp-sa.json='${{ secrets.GCP_SA }}' \
             --dry-run=client -o yaml | kubectl apply -f -
           
-          echo "✓ GCP Service Account secret created/updated in cluster"
+          echo "✓ GCP Service Account secret created/updated"
 
-      - name: Wait for 1 Minute (Pre-Deployment Pause)
-        run: |
-          echo "Waiting 60 seconds for GKE API server stability..."
-          sleep 60
+      - name: Wait for API Server Stability
+        run: sleep 60
 
-      - name: Apply Kubernetes Manifests (Deployment, Service, and HPA)
-        run: |
-          MANIFEST_PATH=${{ env.MANIFEST_PATH }}
+      - name: Apply Kubernetes Manifests
+        run: kubectl apply -f ${{ env.MANIFEST_PATH }}
           
-          echo "Applying deployment, service, and HPA from ${MANIFEST_PATH}..."
-          kubectl apply -f ${MANIFEST_PATH}
-          
-      - name: Wait for 2 Minutes (Deployment Readiness)
-        run: |
-          echo "Waiting 120 seconds for deployment readiness..."
-          sleep 120
+      - name: Wait for Deployment Readiness
+        run: sleep 120
 
-      - name: Verify Deployment Rollout Status
+      - name: Verify Deployment Rollout
         run: |
-          echo "Waiting for deployment ${{ env.DEPLOYMENT_NAME }} to complete rollout..."
           kubectl rollout status deployment/${{ env.DEPLOYMENT_NAME }} --timeout=5m
           echo "Deployment successful!"
           
-      - name: Wait for LoadBalancer IP Provisioning
-        run: |
-          echo "Waiting 120 seconds for LoadBalancer to get an external IP..."
-          sleep 120
+      - name: Wait for LoadBalancer IP
+        run: sleep 120
 
       - name: Show Service Status
         run: |
-          echo "Service Status (External IP):"
           kubectl get service ${{ env.DEPLOYMENT_NAME }}-service
           kubectl get nodes -o wide
 
-  # ==========================================================
-  # JOB 4: STRESS TESTING AND HPA DEMO
-  # ==========================================================
   stress-test:
     runs-on: ubuntu-latest
     needs: build-and-deploy
@@ -498,140 +327,120 @@ EOF
         with:
           credentials_json: ${{ secrets.GCP_SA }}
 
-      - name: Get GKE Credentials (Configure kubectl)
+      - name: Get GKE Credentials
         uses: google-github-actions/get-gke-credentials@v2
         with:
           cluster_name: ${{ env.GKE_CLUSTER }}
           location: ${{ env.GKE_ZONE }}
 
-      - name: Install wrk (HTTP benchmarking tool)
+      - name: Install wrk
         run: sudo apt-get update && sudo apt-get install -y wrk
 
       - name: Get Service External IP
         id: get_ip
         run: |
-          echo "Attempting to retrieve external IP..."
           EXTERNAL_IP=$(kubectl get svc ${{ env.DEPLOYMENT_NAME }}-service -o jsonpath='{.status.loadBalancer.ingress[0].ip}')
-          
           echo "external_ip=$EXTERNAL_IP" >> $GITHUB_OUTPUT
-          echo "External IP found: $EXTERNAL_IP"
+          echo "External IP: $EXTERNAL_IP"
 
-      - name: Create wrk Lua Script for POST requests
+      - name: Create wrk Lua Script
         run: |
-          cat << EOF > iris_payload.lua
+          cat > iris_payload.lua << 'LUA_EOF'
           local post_body = '{"sepal_length": 5.1, "sepal_width": 3.5, "petal_length": 1.4, "petal_width": 0.2}'
           
           request = function()
             return wrk.format("POST", nil, {["Content-Type"] = "application/json"}, post_body)
           end
-          EOF
+          LUA_EOF
           
-      - name: Warm-up Model Endpoints
+      - name: Warm-up Endpoints
         run: |
           EXTERNAL_URL="http://${{ steps.get_ip.outputs.external_ip }}"
           PAYLOAD='{"sepal_length": 5.1, "sepal_width": 3.5, "petal_length": 1.4, "petal_width": 0.2}'
           
-          echo "Warming up /health..."
           curl -s "${EXTERNAL_URL}/health" > /dev/null 2>&1
-          
-          echo "Warming up /predict..."
           curl -s -X POST -H "Content-Type: application/json" -d "$PAYLOAD" "${EXTERNAL_URL}/predict" > /dev/null 2>&1
-          echo "Warm-up complete."
 
-      # SCENARIO 1: HPA DEMONSTRATION (Max Pods: 3)
-      - name: "Scenario 1: HPA Scaling on /predict (Max Pods: 3, 100 Users)"
-        id: scenario_1
+      - name: "Scenario 1: HPA Scaling Test"
         run: |
           EXTERNAL_URL="http://${{ steps.get_ip.outputs.external_ip }}"
-          TARGET_ENDPOINT="${EXTERNAL_URL}/predict"
-          echo "# 🚀 Stress Test & HPA Results" > stress_report.md
-          echo "" >> stress_report.md
+          TARGET="${EXTERNAL_URL}/predict"
+          
+          cat > stress_report.md << 'STRESS_EOF'
+          # 🚀 Stress Test & HPA Results
+          
+          STRESS_EOF
+          
           echo "**External IP:** ${{ steps.get_ip.outputs.external_ip }}" >> stress_report.md
-          echo "**Test Date:** $(date -u '+%Y-%m-%d %H:%M:%S UTC')" >> stress_report.md
           echo "" >> stress_report.md
           echo "---" >> stress_report.md
           echo "" >> stress_report.md
-          echo "## SCENARIO 1: HPA Scaling on \`/predict\` (Max Pods: 3, 100 Users)" >> stress_report.md
+          echo "## SCENARIO 1: HPA Scaling (Max Pods: 3, 100 Users)" >> stress_report.md
+          echo "" >> stress_report.md
           
           kubectl patch hpa/fastapi-backend-hpa -p '{"spec":{"maxReplicas": 3}}'
-          echo "HPA set to maxReplicas=3. Starting stress test..."
+          wrk -t4 -c100 -d30s --script ./iris_payload.lua $TARGET > wrk_results_1.txt
           
-          wrk -t4 -c100 -d30s --script ./iris_payload.lua $TARGET_ENDPOINT > wrk_results_1.txt
-          
-          echo "The load test ran for **30 seconds** with 100 concurrent connections." >> stress_report.md
-          echo "" >> stress_report.md
-          echo "### Test 1 Results (Raw wrk Output):" >> stress_report.md
-          echo "\`\`\`text" >> stress_report.md
+          echo '```
           cat wrk_results_1.txt >> stress_report.md
-          echo "\`\`\`" >> stress_report.md
+          echo '```' >> stress_report.md
           
-          echo "Waiting 60s to observe scaling..." >> stress_report.md
           sleep 60
           echo "" >> stress_report.md
-          echo "### Kubernetes Status After Scaling:" >> stress_report.md
-          echo "\`\`\`" >> stress_report.md
+          echo "### Kubernetes Status:" >> stress_report.md
+          echo '```
           kubectl get deployment fastapi-backend -o wide >> stress_report.md
           kubectl get hpa fastapi-backend-hpa -o wide >> stress_report.md
-          echo "\`\`\`" >> stress_report.md
+          echo '```' >> stress_report.md
           
-      # SCENARIO 2: BOTTLENECK OBSERVATION (Max Pods: 1, Concurrency 1000)
-      - name: "Scenario 2: Bottleneck (Max Pods: 1, Concurrency: 1000)"
-        id: scenario_2
+      - name: "Scenario 2: Bottleneck Test (C: 1000)"
         run: |
           EXTERNAL_URL="http://${{ steps.get_ip.outputs.external_ip }}"
-          TARGET_ENDPOINT="${EXTERNAL_URL}/health"
-          echo -e "\n\n---" >> stress_report.md
-          echo "## SCENARIO 2: Bottleneck (Max Pods: 1, C: 1000) on \`/health\`" >> stress_report.md
+          TARGET="${EXTERNAL_URL}/health"
+          
+          echo "" >> stress_report.md
+          echo "---" >> stress_report.md
+          echo "## SCENARIO 2: Bottleneck (Max Pods: 1, C: 1000)" >> stress_report.md
+          echo "" >> stress_report.md
           
           kubectl scale deployment/fastapi-backend --replicas=1
           kubectl patch hpa/fastapi-backend-hpa -p '{"spec":{"maxReplicas": 1}}'
-          echo "HPA restricted to maxReplicas=1."
           sleep 30
           
-          wrk -t4 -c1000 -d120s $TARGET_ENDPOINT > wrk_results_2.txt
+          wrk -t4 -c1000 -d120s $TARGET > wrk_results_2.txt
           
-          echo "This test uses high concurrency (1000 connections) for 120 seconds." >> stress_report.md
-          echo "" >> stress_report.md
-          echo "### Test 2 Results (Raw wrk Output):" >> stress_report.md
-          echo "\`\`\`text" >> stress_report.md
+          echo '```
           cat wrk_results_2.txt >> stress_report.md
-          echo "\`\`\`" >> stress_report.md
+          echo '```' >> stress_report.md
+          
           echo "" >> stress_report.md
-          echo "### Kubernetes Status After Test:" >> stress_report.md
-          echo "\`\`\`" >> stress_report.md
+          echo "### Status:" >> stress_report.md
+          echo '```
           kubectl get deployment fastapi-backend -o wide >> stress_report.md
           kubectl get hpa fastapi-backend-hpa -o wide >> stress_report.md
-          echo "\`\`\`" >> stress_report.md
+          echo '```' >> stress_report.md
 
-      # SCENARIO 3: SEVERE BOTTLENECK (Max Pods: 1, Concurrency 2000)
       - name: "Scenario 3: Severe Bottleneck (C: 2000)"
-        id: scenario_3
         run: |
           EXTERNAL_URL="http://${{ steps.get_ip.outputs.external_ip }}"
-          TARGET_ENDPOINT="${EXTERNAL_URL}/health"
-          echo -e "\n\n---" >> stress_report.md
-          echo "## SCENARIO 3: Severe Bottleneck (Max Pods: 1, C: 2000)" >> stress_report.md
+          TARGET="${EXTERNAL_URL}/health"
           
-          wrk -t4 -c2000 -d60s $TARGET_ENDPOINT > wrk_results_3.txt
-          
-          echo "This test uses **extreme** concurrency (2000 connections) for 60 seconds." >> stress_report.md
-          echo "" >> stress_report.md
-          echo "### Test 3 Results (Raw wrk Output):" >> stress_report.md
-          echo "\`\`\`text" >> stress_report.md
-          cat wrk_results_3.txt >> stress_report.md
-          echo "\`\`\`" >> stress_report.md
-          echo "" >> stress_report.md
-          echo "### Kubernetes Status After Test:" >> stress_report.md
-          echo "\`\`\`" >> stress_report.md
-          kubectl get deployment fastapi-backend -o wide >> stress_report.md
-          kubectl get hpa fastapi-backend-hpa -o wide >> stress_report.md
-          echo "\`\`\`" >> stress_report.md
           echo "" >> stress_report.md
           echo "---" >> stress_report.md
+          echo "## SCENARIO 3: Severe Bottleneck (C: 2000)" >> stress_report.md
           echo "" >> stress_report.md
-          echo "🤖 *Generated by CI/CD Pipeline* | 📅 $(date -u '+%Y-%m-%d %H:%M:%S UTC')" >> stress_report.md
+          
+          wrk -t4 -c2000 -d60s $TARGET > wrk_results_3.txt
+          
+          echo '```
+          cat wrk_results_3.txt >> stress_report.md
+          echo '```' >> stress_report.md
+          
+          echo "" >> stress_report.md
+          echo "---" >> stress_report.md
+          echo "🤖 *Generated by CI/CD Pipeline*" >> stress_report.md
 
-      - name: Create CML Report Comment
+      - name: Create CML Stress Test Report
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: cml comment create stress_report.md
