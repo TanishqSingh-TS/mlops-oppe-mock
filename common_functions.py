@@ -1,5 +1,5 @@
 """
-Common MLOps Functions - Updated for Evidently 0.7+ API
+Common MLOps Functions - Evidently 0.7+ (Working Pattern from test_experiment.py)
 Shared utilities for training, evaluation, drift detection, and visualization
 """
 
@@ -20,7 +20,7 @@ import seaborn as sns
 from typing import Dict, List, Tuple
 import subprocess
 
-# ✅ CORRECTED Evidently imports for 0.7+ (Tabular Data Drift)
+# ✅ Evidently imports - Same as your working code
 from evidently import Report
 from evidently.presets import DataDriftPreset
 
@@ -273,7 +273,7 @@ def generate_confusion_matrix(
     print(f"✓ Generated confusion matrix: {filename}")
     return path
 
-# --- EVIDENTLY DATA DRIFT (OFFICIAL 0.7+ API) ---
+# --- EVIDENTLY DATA DRIFT (USING YOUR WORKING PATTERN) ---
 
 def generate_drift_report(
     reference_df: pd.DataFrame,
@@ -282,270 +282,209 @@ def generate_drift_report(
     filename: str = "drift_report.html"
 ) -> Dict:
     """
-    Generates Evidently data drift report using official 0.7+ API.
-    
-    Reference: https://docs.evidentlyai.com
-    GitHub Example: https://github.com/evidentlyai/evidently#data-and-ml-evals
+    Generates Evidently data drift report using the exact pattern from test_experiment.py
+    that's already working in your code.
     """
-    print("\n--- Generating Evidently Data Drift Report (v0.7+ API) ---")
+    print("\n--- Generating Evidently Data Drift Report ---")
     
-    # Ensure both datasets have same columns
-    common_cols = list(set(reference_df.columns) & set(current_df.columns))
-    ref_data = reference_df[common_cols].copy()
-    cur_data = current_df[common_cols].copy()
-    
-    # Select only numerical features for drift detection
-    numerical_cols = ['sepal_length', 'sepal_width', 'petal_length', 'petal_width']
-    available_cols = [col for col in numerical_cols if col in common_cols]
-    
-    ref_data = ref_data[available_cols]
-    cur_data = cur_data[available_cols]
-    
-    print(f"Reference data shape: {ref_data.shape}")
-    print(f"Current data shape: {cur_data.shape}")
-    
-    try:
-        # Create Report with DataDriftPreset
-        # Official docs: pass current_data first, then reference_data
-        report = Report([
-            DataDriftPreset()
-        ])
-        
-        # Run report - NEW API: current first, reference second
-        my_eval = report.run(current_data=cur_data, reference_data=ref_data)
-        
-        # Save HTML report
-        report_path = os.path.join(artifacts_dir, filename)
-        my_eval.save_html(report_path)
-        
-        # Extract metrics as dict
-        report_dict = my_eval.as_dict()
-        
-        # Extract drift detection results
-        dataset_drift = False
-        drift_share = 0.0
-        num_drifted_columns = 0
-        
-        try:
-            # Navigate the report structure
-            metrics = report_dict.get('metrics', [])
-            
-            for metric in metrics:
-                metric_type = metric.get('metric', '')
-                
-                # Look for dataset drift summary
-                if 'DatasetDrift' in metric_type or 'drift' in metric_type.lower():
-                    result = metric.get('result', {})
-                    
-                    # Try different possible keys
-                    drift_share = result.get('drift_share', 0)
-                    num_drifted_columns = result.get('number_of_drifted_columns', 0)
-                    dataset_drift = result.get('dataset_drift', False)
-                    
-                    if drift_share == 0 and num_drifted_columns > 0:
-                        drift_share = num_drifted_columns / len(available_cols)
-                    
-                    break
-        except Exception as e:
-            print(f"Warning: Could not extract drift metrics: {e}")
-        
-        print(f"✓ Drift report saved: {report_path}")
-        print(f"✓ Dataset drift detected: {dataset_drift}")
-        print(f"✓ Number of drifted columns: {num_drifted_columns}")
-        print(f"✓ Drift share: {drift_share:.2f}")
-        
-        return {
-            "status": "success",
-            "report_path": report_path,
-            "reference_size": len(ref_data),
-            "current_size": len(cur_data),
-            "drift_detected": dataset_drift,
-            "drift_share": round(drift_share, 4),
-            "num_drifted_columns": num_drifted_columns
-        }
-        
-    except Exception as e:
-        print(f"⚠️ Evidently drift report failed: {e}")
-        print("Creating fallback statistical report...")
-        return _create_simple_drift_report(ref_data, cur_data, artifacts_dir, filename)
-
-
-def generate_drift_report_with_tests(
-    reference_df: pd.DataFrame,
-    current_df: pd.DataFrame,
-    artifacts_dir: str,
-    filename: str = "drift_report_with_tests.html"
-) -> Dict:
-    """
-    Generates Evidently drift report with test conditions.
-    Tests are unified with Reports in 0.7+ API.
-    """
-    print("\n--- Running Evidently Drift Report with Tests (v0.7+ API) ---")
-    
-    common_cols = list(set(reference_df.columns) & set(current_df.columns))
-    numerical_cols = ['sepal_length', 'sepal_width', 'petal_length', 'petal_width']
-    available_cols = [col for col in numerical_cols if col in common_cols]
-    
-    ref_data = reference_df[available_cols].copy()
-    cur_data = current_df[available_cols].copy()
-    
-    try:
-        # Create Report with tests enabled
-        report = Report([
-            DataDriftPreset()
-        ])
-        
-        # Run report
-        my_eval = report.run(current_data=cur_data, reference_data=ref_data)
-        
-        # Save results
-        report_path = os.path.join(artifacts_dir, filename)
-        my_eval.save_html(report_path)
-        
-        # Get results as dictionary
-        report_dict = my_eval.as_dict()
-        
-        # Check test results (if any)
-        test_results = report_dict.get('tests', [])
-        all_tests_passed = all(test.get('status') == 'SUCCESS' for test in test_results) if test_results else True
-        
-        print(f"✓ Report with tests saved: {report_path}")
-        print(f"✓ Tests run: {len(test_results)}")
-        print(f"✓ All tests passed: {all_tests_passed}")
-        
-        return {
-            "status": "success",
-            "report_path": report_path,
-            "report_dict": report_dict,
-            "tests_passed": all_tests_passed,
-            "num_tests": len(test_results)
-        }
-        
-    except Exception as e:
-        print(f"⚠️ Evidently drift report with tests failed: {e}")
-        return _create_simple_drift_report(ref_data, cur_data, artifacts_dir, filename)
-
-
-def _create_simple_drift_report(
-    reference_df: pd.DataFrame,
-    current_df: pd.DataFrame,
-    artifacts_dir: str,
-    filename: str
-) -> Dict:
-    """
-    Fallback: Creates a simple statistical drift report when Evidently fails.
-    """
-    print("Creating simple statistical drift report...")
-    
+    # Prepare data - only numerical features
     numerical_cols = ['sepal_length', 'sepal_width', 'petal_length', 'petal_width']
     available_cols = [col for col in numerical_cols if col in reference_df.columns and col in current_df.columns]
     
-    drift_results = []
-    total_drift_score = 0
+    reference_data = reference_df[available_cols].copy()
+    current_data = current_df[available_cols].copy()
     
-    for col in available_cols:
-        ref_mean = reference_df[col].mean()
-        cur_mean = current_df[col].mean()
-        ref_std = reference_df[col].std()
-        cur_std = current_df[col].std()
-        
-        # Simple drift score: normalized difference in means
-        mean_diff = abs(cur_mean - ref_mean) / (ref_std + 1e-10)
-        total_drift_score += mean_diff
-        
-        drift_results.append({
-            'feature': col,
-            'ref_mean': round(ref_mean, 4),
-            'cur_mean': round(cur_mean, 4),
-            'ref_std': round(ref_std, 4),
-            'cur_std': round(cur_std, 4),
-            'drift_score': round(mean_diff, 4)
-        })
+    print(f"Reference data shape: {reference_data.shape}")
+    print(f"Current data shape: {current_data.shape}")
     
-    avg_drift_score = total_drift_score / len(available_cols) if available_cols else 0
-    dataset_drift = avg_drift_score > 0.5
-    
-    # Create HTML report
-    html_content = f"""
-    <!DOCTYPE html>
-    <html>
-    <head>
-        <title>Simple Data Drift Report</title>
-        <style>
-            body {{ font-family: Arial, sans-serif; margin: 20px; }}
-            h1 {{ color: #333; }}
-            table {{ border-collapse: collapse; width: 100%; margin-top: 20px; }}
-            th, td {{ border: 1px solid #ddd; padding: 12px; text-align: left; }}
-            th {{ background-color: #4CAF50; color: white; }}
-            tr:nth-child(even) {{ background-color: #f2f2f2; }}
-            .alert {{ padding: 15px; margin: 20px 0; border-radius: 5px; }}
-            .alert-warning {{ background-color: #fff3cd; border: 1px solid #ffc107; }}
-            .alert-success {{ background-color: #d4edda; border: 1px solid #28a745; }}
-        </style>
-    </head>
-    <body>
-        <h1>📊 Simple Data Drift Analysis</h1>
+    try:
+        # ✅ Generate Report using latest API (EXACT PATTERN from your code)
+        report = Report([
+            DataDriftPreset()
+        ],
+        include_tests=True)
         
-        <div class="alert {'alert-warning' if dataset_drift else 'alert-success'}">
-            <strong>Drift Detection:</strong> {'⚠️ Drift Detected' if dataset_drift else '✅ No Significant Drift'}<br>
-            <strong>Average Drift Score:</strong> {avg_drift_score:.4f}
-        </div>
+        # ✅ Run returns evaluation object
+        my_eval = report.run(current_data, reference_data)
         
-        <h2>Feature-Level Drift Analysis</h2>
-        <table>
-            <tr>
-                <th>Feature</th>
-                <th>Reference Mean</th>
-                <th>Current Mean</th>
-                <th>Reference Std</th>
-                <th>Current Std</th>
-                <th>Drift Score</th>
-            </tr>
+        # ✅ Save HTML using returned object
+        report_path = os.path.join(artifacts_dir, filename)
+        my_eval.save_html(report_path)
+        
+        print(f"✓ Drift report saved: {report_path}")
+        
+        # ✅ Optional: Get drift results as dict or JSON
+        drift_dict = None
+        dataset_drift = False
+        drift_share = 0.0
+        num_drifted_columns = 0
+        drifted_features = []
+        
+        try:
+            drift_dict = my_eval.dict()
+            print("✓ Drift detection completed successfully")
+            
+            # Parse drift metrics
+            metrics = drift_dict.get('metrics', [])
+            for metric in metrics:
+                metric_name = metric.get('metric', '')
+                result = metric.get('result', {})
+                
+                if 'DatasetDrift' in metric_name or 'drift' in metric_name.lower():
+                    dataset_drift = result.get('dataset_drift', False)
+                    drift_share = result.get('drift_share', 0.0)
+                    num_drifted_columns = result.get('number_of_drifted_columns', 0)
+                    
+                    # Extract drifted column names
+                    if 'drift_by_columns' in result:
+                        for col, col_result in result['drift_by_columns'].items():
+                            if col_result.get('drift_detected', False):
+                                drifted_features.append(col)
+                    
+                    break
+            
+            print(f"✓ Dataset drift: {dataset_drift}")
+            print(f"✓ Drift share: {drift_share:.2%}")
+            print(f"✓ Drifted columns: {num_drifted_columns}/{len(available_cols)}")
+            if drifted_features:
+                print(f"✓ Drifted features: {', '.join(drifted_features)}")
+                
+        except Exception as e:
+            print(f"Warning: Could not extract drift results: {e}")
+        
+        return {
+            "status": "success",
+            "report_path": report_path,
+            "reference_size": len(reference_data),
+            "current_size": len(current_data),
+            "dataset_drift": dataset_drift,
+            "drift_share": round(drift_share, 4),
+            "num_drifted_columns": num_drifted_columns,
+            "total_columns": len(available_cols),
+            "drifted_features": drifted_features,
+            "drift_dict": drift_dict
+        }
+        
+    except Exception as e:
+        print(f"⚠️ Error generating drift report: {e}")
+        return {
+            "status": "error",
+            "error_message": str(e),
+            "report_path": None,
+            "dataset_drift": False,
+            "drift_share": 0.0
+        }
+
+
+def generate_drift_report_with_predictions(
+    reference_df: pd.DataFrame,
+    current_df: pd.DataFrame,
+    y_reference: pd.Series,
+    y_current: pd.Series,
+    y_pred_reference: np.ndarray,
+    y_pred_current: np.ndarray,
+    artifacts_dir: str,
+    filename: str = "drift_report_with_predictions.html"
+) -> Dict:
     """
-    
-    for result in drift_results:
-        html_content += f"""
-            <tr>
-                <td><strong>{result['feature']}</strong></td>
-                <td>{result['ref_mean']}</td>
-                <td>{result['cur_mean']}</td>
-                <td>{result['ref_std']}</td>
-                <td>{result['cur_std']}</td>
-                <td>{result['drift_score']}</td>
-            </tr>
-        """
-    
-    html_content += f"""
-        </table>
-        
-        <h2>Dataset Summary</h2>
-        <p><strong>Reference Dataset Size:</strong> {len(reference_df)} samples</p>
-        <p><strong>Current Dataset Size:</strong> {len(current_df)} samples</p>
-        <p><strong>Features Analyzed:</strong> {len(available_cols)}</p>
-        
-        <hr>
-        <p style="color: #666; font-size: 12px;">
-            <em>Note: This is a simplified statistical drift report. 
-            For full Evidently features, ensure evidently>=0.4.0 is installed.</em>
-        </p>
-    </body>
-    </html>
+    Enhanced drift report including target and prediction columns.
+    Follows the exact pattern from test_experiment.py Experiment 4.
     """
+    print("\n--- Generating Enhanced Drift Report with Predictions ---")
     
-    report_path = os.path.join(artifacts_dir, filename)
-    with open(report_path, 'w', encoding='utf-8') as f:
-        f.write(html_content)
+    # Prepare DataFrames with target and predictions (like your experiment)
+    reference_data = reference_df.copy()
+    reference_data['target'] = y_reference.values
+    reference_data['prediction'] = y_pred_reference
+
+    current_data = current_df.copy()
+    current_data['target'] = y_current.values
+    current_data['prediction'] = y_pred_current
     
-    print(f"✓ Simple drift report saved: {report_path}")
+    try:
+        # Generate Report using latest API
+        report = Report([
+            DataDriftPreset()
+        ],
+        include_tests=True)
+        
+        # Run returns evaluation object
+        my_eval = report.run(current_data, reference_data)
+        
+        # Save HTML using returned object
+        report_path = os.path.join(artifacts_dir, filename)
+        my_eval.save_html(report_path)
+        
+        print(f"✓ Enhanced drift report saved: {report_path}")
+        
+        # Get drift results
+        try:
+            drift_dict = my_eval.dict()
+            print("✓ Drift detection with predictions completed successfully")
+        except Exception as e:
+            print(f"Warning: Could not extract drift results: {e}")
+            drift_dict = None
+        
+        return {
+            "status": "success",
+            "report_path": report_path,
+            "reference_size": len(reference_data),
+            "current_size": len(current_data),
+            "drift_dict": drift_dict
+        }
+        
+    except Exception as e:
+        print(f"⚠️ Error generating enhanced drift report: {e}")
+        return {
+            "status": "error",
+            "error_message": str(e),
+            "report_path": None
+        }
+
+
+def create_drift_summary_for_cml(drift_result: Dict) -> str:
+    """
+    Creates a markdown summary of drift results for CML reporting.
+    """
+    if drift_result.get('status') == 'error':
+        return f"""
+### ⚠️ Data Drift Analysis - Error
+
+**Status:** Failed to generate drift report
+
+**Error:** {drift_result.get('error_message', 'Unknown error')}
+"""
     
-    return {
-        "status": "success",
-        "report_path": report_path,
-        "reference_size": len(reference_df),
-        "current_size": len(current_df),
-        "drift_detected": dataset_drift,
-        "drift_share": round(avg_drift_score, 4)
-    }
+    drift_status = "🚨 **DRIFT DETECTED**" if drift_result.get('dataset_drift', False) else "✅ **NO SIGNIFICANT DRIFT**"
+    drift_share = drift_result.get('drift_share', 0)
+    num_drifted = drift_result.get('num_drifted_columns', 0)
+    total_cols = drift_result.get('total_columns', 0)
+    drifted_features = drift_result.get('drifted_features', [])
+    
+    summary = f"""
+### 📊 Data Drift Analysis Results
+
+**Status:** {drift_status}
+
+**Drift Share:** {drift_share:.2%} of features show drift
+
+**Drifted Features:** {num_drifted}/{total_cols} columns
+"""
+    
+    if drifted_features:
+        features_str = ', '.join([f'`{f}`' for f in drifted_features])
+        summary += f"\n**Features with drift:** {features_str}\n"
+    
+    summary += f"""
+**Dataset Sizes:**
+- Reference: {drift_result.get('reference_size', 0)} samples
+- Current: {drift_result.get('current_size', 0)} samples
+
+📄 **Full interactive HTML report available in artifacts**
+"""
+    
+    return summary
+
 
 # --- LOGGING HELPERS ---
 
