@@ -14,4 +14,4 @@ dvc[gcs]
 sniffio
 evidently
 shap
-
+fairlearn

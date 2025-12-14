@@ -356,7 +356,7 @@ jobs:
         run: kubectl apply -f ${{ env.MANIFEST_PATH }}
           
       - name: Wait for Deployment Readiness
-        run: sleep 120
+        run: sleep 60
 
       - name: Verify Deployment Rollout
         run: |
@@ -364,12 +364,11 @@ jobs:
           echo "Deployment successful!"
           
       - name: Wait for LoadBalancer IP
-        run: sleep 120
+        run: sleep 60
 
       - name: Show Service Status
         run: |
           kubectl get service ${{ env.DEPLOYMENT_NAME }}-service
-          kubectl get nodes -o wide
 
   stress-test:
     runs-on: ubuntu-latest
