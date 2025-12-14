@@ -95,7 +95,7 @@ jobs:
           
           REPORT_EOF
           
-          echo '```'
+          echo '```' >> ci_experiments_report.md
           python test_experiment.py 2>&1 | tee -a ci_experiments_report.md
           echo '```' >> ci_experiments_report.md
           echo "" >> ci_experiments_report.md
@@ -128,7 +128,9 @@ jobs:
           echo "" >> ci_experiments_report.md
           
           for species in setosa versicolor virginica; do
-            echo "### 🌸 Species: **${species^}**" >> ci_experiments_report.md
+            species_cap=$(echo "$species" | awk '{print toupper(substr($0,1,1)) tolower(substr($0,2))}')
+            
+            echo "### 🌸 Species: **${species_cap}**" >> ci_experiments_report.md
             echo "" >> ci_experiments_report.md
             
             if [ -f "ci_artifacts/ci_shap_waterfall_${species}.png" ]; then
@@ -196,21 +198,13 @@ jobs:
           echo "Evaluates model performance across different demographic groups (location attribute)." >> ci_experiments_report.md
           echo "" >> ci_experiments_report.md
           
-          # Extract fairness metrics if available
           if grep -q "Fairness Accuracy Difference:" ci_experiments_report.md 2>/dev/null; then
             fairness_diff=$(grep "Fairness Accuracy Difference:" ci_experiments_report.md | grep -oP '[\d.]+' | head -1)
             echo "### Fairness Metrics Summary" >> ci_experiments_report.md
             echo "" >> ci_experiments_report.md
             echo "- **Accuracy Difference Between Groups:** ${fairness_diff}" >> ci_experiments_report.md
             echo "" >> ci_experiments_report.md
-            
-            if (( $(echo "$fairness_diff < 0.05" | bc -l) )); then
-              echo "✅ **Status:** Minimal bias (difference < 0.05)" >> ci_experiments_report.md
-            elif (( $(echo "$fairness_diff < 0.10" | bc -l) )); then
-              echo "⚠️ **Status:** Moderate bias detected (0.05 ≤ difference < 0.10)" >> ci_experiments_report.md
-            else
-              echo "❌ **Status:** Significant bias detected (difference ≥ 0.10)" >> ci_experiments_report.md
-            fi
+            echo "Lower values indicate more fair predictions across demographic groups." >> ci_experiments_report.md
           else
             echo "Fairness metrics will be displayed after experiment completion." >> ci_experiments_report.md
           fi
@@ -225,7 +219,6 @@ jobs:
           echo "| Species | Precision | Recall | F1-Score |" >> ci_experiments_report.md
           echo "|---------|-----------|--------|----------|" >> ci_experiments_report.md
           
-          # Try to extract metrics
           if grep -q "setosa: P=" ci_experiments_report.md 2>/dev/null; then
             for species in setosa versicolor virginica; do
               line=$(grep "${species}: P=" ci_experiments_report.md | head -1)
@@ -233,7 +226,8 @@ jobs:
                 precision=$(echo "$line" | grep -oP 'P=\K[\d.]+')
                 recall=$(echo "$line" | grep -oP 'R=\K[\d.]+')
                 f1=$(echo "$line" | grep -oP 'F1=\K[\d.]+')
-                echo "| **${species^}** | ${precision} | ${recall} | ${f1} |" >> ci_experiments_report.md
+                species_cap=$(echo "$species" | awk '{print toupper(substr($0,1,1)) tolower(substr($0,2))}')
+                echo "| **${species_cap}** | ${precision} | ${recall} | ${f1} |" >> ci_experiments_report.md
               fi
             done
           else
@@ -251,7 +245,7 @@ jobs:
           
           if [ -d "ci_artifacts" ]; then
             echo "### Files Generated:" >> ci_experiments_report.md
-            echo '```
+            echo '```' >> ci_experiments_report.md
             ls -lh ci_artifacts/ >> ci_experiments_report.md
             echo '```' >> ci_experiments_report.md
             echo "" >> ci_experiments_report.md
@@ -453,7 +447,7 @@ jobs:
           wrk -t4 -c100 -d30s --script ./iris_payload.lua $TARGET > wrk_results_1.txt
           
           echo "### Test 1 Results:" >> stress_report.md
-          echo '```
+          echo '```' >> stress_report.md
           cat wrk_results_1.txt >> stress_report.md
           echo '```' >> stress_report.md
           
@@ -463,12 +457,12 @@ jobs:
           
           echo "" >> stress_report.md
           echo "### Kubernetes Status After Scaling:" >> stress_report.md
-          echo '```
+          echo '```' >> stress_report.md
           kubectl get deployment fastapi-backend -o wide >> stress_report.md
           kubectl get hpa fastapi-backend-hpa -o wide >> stress_report.md
           echo '```' >> stress_report.md
           
-      - name: "Scenario 2: Bottleneck Test (C: 1000)"
+      - name: "Scenario 2: Bottleneck Test"
         run: |
           EXTERNAL_URL="http://${{ steps.get_ip.outputs.external_ip }}"
           TARGET="${EXTERNAL_URL}/health"
@@ -487,18 +481,18 @@ jobs:
           wrk -t4 -c1000 -d120s $TARGET > wrk_results_2.txt
           
           echo "### Test 2 Results:" >> stress_report.md
-          echo '```
+          echo '```' >> stress_report.md
           cat wrk_results_2.txt >> stress_report.md
           echo '```' >> stress_report.md
           
           echo "" >> stress_report.md
           echo "### Kubernetes Status After Test:" >> stress_report.md
-          echo '```
+          echo '```' >> stress_report.md
           kubectl get deployment fastapi-backend -o wide >> stress_report.md
           kubectl get hpa fastapi-backend-hpa -o wide >> stress_report.md
           echo '```' >> stress_report.md
 
-      - name: "Scenario 3: Severe Bottleneck (C: 2000)"
+      - name: "Scenario 3: Severe Bottleneck"
         run: |
           EXTERNAL_URL="http://${{ steps.get_ip.outputs.external_ip }}"
           TARGET="${EXTERNAL_URL}/health"
@@ -513,13 +507,13 @@ jobs:
           wrk -t4 -c2000 -d60s $TARGET > wrk_results_3.txt
           
           echo "### Test 3 Results:" >> stress_report.md
-          echo '```
+          echo '```' >> stress_report.md
           cat wrk_results_3.txt >> stress_report.md
           echo '```' >> stress_report.md
           
           echo "" >> stress_report.md
           echo "### Kubernetes Status After Test:" >> stress_report.md
-          echo '```
+          echo '```' >> stress_report.md
           kubectl get deployment fastapi-backend -o wide >> stress_report.md
           kubectl get hpa fastapi-backend-hpa -o wide >> stress_report.md
           echo '```' >> stress_report.md
