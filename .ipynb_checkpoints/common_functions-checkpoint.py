@@ -529,3 +529,83 @@ def log_artifacts_to_mlflow(artifact_paths: List[str]):
     for path in artifact_paths:
         if os.path.exists(path):
             mlflow.log_artifact(path)
+
+def generate_drift_report_with_tests(
+    reference_df: pd.DataFrame,
+    current_df: pd.DataFrame,
+    artifacts_dir: str,
+    filename: str = "drift_report_with_tests.html"
+) -> Dict:
+    """
+    Generates Evidently drift report with test conditions enabled.
+    Tests are automatically included via include_tests=True parameter.
+    """
+    print("\n--- Running Evidently Drift Report with Tests ---")
+    
+    # Prepare data - only numerical features
+    numerical_cols = ['sepal_length', 'sepal_width', 'petal_length', 'petal_width']
+    available_cols = [col for col in numerical_cols if col in reference_df.columns and col in current_df.columns]
+    
+    reference_data = reference_df[available_cols].copy()
+    current_data = current_df[available_cols].copy()
+    
+    print(f"Reference data shape: {reference_data.shape}")
+    print(f"Current data shape: {current_data.shape}")
+    
+    try:
+        # Generate Report with tests enabled
+        report = Report([
+            DataDriftPreset()
+        ],
+        include_tests=True)  # ✅ This enables test conditions
+        
+        # Run returns evaluation object
+        my_eval = report.run(current_data, reference_data)
+        
+        # Save HTML using returned object
+        report_path = os.path.join(artifacts_dir, filename)
+        my_eval.save_html(report_path)
+        
+        print(f"✓ Report with tests saved: {report_path}")
+        
+        # Get results as dictionary
+        drift_dict = None
+        tests_passed = True
+        num_tests = 0
+        
+        try:
+            drift_dict = my_eval.dict()
+            
+            # Check test results (if any)
+            test_results = drift_dict.get('tests', [])
+            num_tests = len(test_results)
+            
+            if test_results:
+                tests_passed = all(test.get('status') == 'SUCCESS' for test in test_results)
+                print(f"✓ Tests run: {num_tests}")
+                print(f"✓ All tests passed: {tests_passed}")
+            else:
+                print("✓ Drift detection completed (no explicit tests in output)")
+                
+        except Exception as e:
+            print(f"Warning: Could not extract test results: {e}")
+        
+        return {
+            "status": "success",
+            "report_path": report_path,
+            "reference_size": len(reference_data),
+            "current_size": len(current_data),
+            "drift_dict": drift_dict,
+            "tests_passed": tests_passed,
+            "num_tests": num_tests
+        }
+        
+    except Exception as e:
+        print(f"⚠️ Error generating drift report with tests: {e}")
+        return {
+            "status": "error",
+            "error_message": str(e),
+            "report_path": None,
+            "tests_passed": False,
+            "num_tests": 0
+        }
