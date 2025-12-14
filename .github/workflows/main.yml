@@ -95,7 +95,7 @@ jobs:
           
           REPORT_EOF
           
-          echo '```
+          echo '```'
           python test_experiment.py 2>&1 | tee -a ci_experiments_report.md
           echo '```' >> ci_experiments_report.md
           echo "" >> ci_experiments_report.md
